@@ -216,8 +216,13 @@ fn readIdentifier(self: *Scanner) !void {
 
     const identifier = self.source[self.start_idx..self.current_idx];
     const token_type = Token.KeywordMap.get(identifier) orelse .Identifier;
+    const literal: Token.Literal = switch (token_type) {
+        .True => .{ .bool = true },
+        .False => .{ .bool = false },
+        else => .none,
+    };
 
-    try self.addToken(.{ .token_type = token_type });
+    try self.addToken(.{ .literal = literal, .token_type = token_type });
 }
 
 fn addToken(self: *Scanner, token: Token) !void {

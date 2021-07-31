@@ -1,3 +1,5 @@
+const debug = false;
+
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 // should probably use a buffered output writer instead
@@ -95,16 +97,19 @@ fn run(allocator: *Allocator, source: []const u8) !void {
     var parser = Parser.init(allocator, scanner.tokens.items);
     defer parser.deinit();
 
-    const expr = parser.parse() catch {
-        print("OH NO\n", .{});
-        return error.ParseError;
+    if (debug) {
+        for (scanner.tokens.items) |token|
+            print("{}, ", .{token});
+        print("\n", .{});
+    }
+
+    const expr = parser.parse() catch |err| switch (err) {
+        error.ParseError => return,
+        else => return err,
     };
 
     const writer = std.io.getStdErr().writer();
     var printer = AstPrinter{};
     try printer.parenthesize(expr, writer);
     try writer.writeByte('\n');
-
-    // for (scanner.tokens.items) |token|
-    //     print("{}\n", .{token});
 }

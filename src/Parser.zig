@@ -35,7 +35,7 @@ pub const ExprLinkedList = struct {
     }
 
     /// prepends the node to the start of the list
-    pub fn add(self: *ExprLinkedList, expr: Expr) !*Expr {
+    pub fn add(self: *ExprLinkedList, expr: Expr) Error!*Expr {
         var new_head = try self.allocator.create(Node);
         new_head.* = Node{ .expr = expr, .next = self.head };
         self.head = new_head;
@@ -107,7 +107,7 @@ pub fn deinit(self: *Parser) void {
     self.exprs.deinit();
 }
 
-pub fn parse(self: *Parser) !*Expr {
+pub fn parse(self: *Parser) Error!*Expr {
     return try self.expression();
 }
 
@@ -194,15 +194,16 @@ fn primary(self: *Parser) Error!*Expr {
 
     if (self.matchOne(.LeftParen)) {
         const expr = try self.expression();
-        try self.consume(.RightParen, "Expected ')' after expression, got {}", .{self.peek().token_type});
+        _ = try self.consume(.RightParen, "Expected ')' after expression, got {}", .{self.peek().token_type});
         return try self.exprs.add(.{ .grouping = .{ .expr = expr } });
     }
 
-    return parseError(self.peek(), "Expected expression, got {}.", .{self.peek().token_type});
+    try parseError(self.peek(), "Expected expression, got {}.", .{self.peek().token_type});
+    unreachable;
 }
 
 fn matchOne(self: *Parser, comptime token_type: Token.Type) bool {
-    return self.match([_]Token.Type{token_type});
+    return self.match(&[_]Token.Type{token_type});
 }
 
 fn match(self: *Parser, comptime token_types: []const Token.Type) bool {
@@ -220,10 +221,11 @@ fn consume(self: *Parser, token_type: Token.Type, comptime error_msg: []const u8
     if (self.check(token_type)) return self.advance();
 
     // report error on the next token's line
-    return parseError(self.peek(), error_msg, error_args);
+    try parseError(self.peek(), error_msg, error_args);
+    unreachable;
 }
 
-fn parseError(token: Token, comptime error_msg: []const u8, error_args: anytype) error.ParseError {
+fn parseError(token: Token, comptime error_msg: []const u8, error_args: anytype) !void {
     reportErr(token.line, error_msg, error_args);
     return error.ParseError;
 }
@@ -264,4 +266,28 @@ fn peek(self: Parser) Token {
 
 fn previous(self: Parser) Token {
     return self.tokens[self.current_idx - 1];
+}
+
+test "Parser" {
+    const tokens = [_]Token{
+        Token{ .token_type = .Minus },
+        Token{ .token_type = .Integer, .literal = .{ .int = 123 } },
+        Token{ .token_type = .Star },
+        Token{ .token_type = .LeftParen },
+        Token{ .token_type = .Float, .literal = .{ .float = 45.67 } },
+        Token{ .token_type = .RightParen },
+        Token{ .token_type = .EndOfFile },
+    };
+
+    var parser = Parser.init(std.testing.allocator, &tokens);
+    defer parser.deinit();
+
+    const expr = try parser.parse();
+
+    std.debug.print("{}\n", .{expr});
+
+    const writer = std.io.getStdErr().writer();
+    var printer = AstPrinter{};
+    try printer.parenthesize(expr, writer);
+    try writer.writeByte('\n');
 }
