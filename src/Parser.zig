@@ -1,19 +1,22 @@
 tokens: []const Token,
 exprs: ExprLinkedList,
+statements: ArrayList(Statement),
 current_idx: usize = 0,
 
 const Parser = @This();
 const std = @import("std");
-const Allocator = std.mem.Allocator;
 const Expr = @import("expr.zig").Expr;
-
-const reportErr = @import("root").reportErr;
+const Statement = @import("statement.zig").Statement;
 const Token = @import("Token.zig");
+
+const Allocator = std.mem.Allocator;
+const ArrayList = std.ArrayList;
+const reportErr = @import("util.zig").reportErr;
 
 const Error = error{ParseError} || std.mem.Allocator.Error;
 
-// TODO: look at std.SinglyLinkedList
 // TODO: is this overcomplicating this? should i just use an arena allocator instead?
+// > actually, obviously better to just allocate and store the pointers in an ArrayList
 // not using an ArrayList due to pointer invalidation on reallocation
 pub const ExprLinkedList = struct {
     allocator: *Allocator,
@@ -65,9 +68,8 @@ test "ExprLinkedList" {
     try std.testing.expectEqualStrings("wow!", expr_linked_list.head.?.expr.literal.value.string);
 }
 
-const AstPrinter = @import("AstPrinter.zig");
-
 test "ExprLinkedList nested" {
+    const AstPrinter = @import("AstPrinter.zig");
     var expr_linked_list = ExprLinkedList.init(std.testing.allocator);
     defer expr_linked_list.deinit();
 
@@ -91,29 +93,91 @@ test "ExprLinkedList nested" {
     });
 
     const writer = std.io.getStdErr().writer();
-    var printer = AstPrinter{};
-    try printer.parenthesize(expr, writer);
+    try AstPrinter.parenthesize(expr, writer);
     try writer.writeByte('\n');
 }
 
 pub fn init(allocator: *Allocator, tokens: []const Token) Parser {
     return Parser{
-        .exprs = ExprLinkedList.init(allocator),
         .tokens = tokens,
+        .exprs = ExprLinkedList.init(allocator),
+        .statements = ArrayList(Statement).init(allocator),
     };
 }
 
 pub fn deinit(self: *Parser) void {
+    self.statements.deinit();
     self.exprs.deinit();
 }
 
-pub fn parse(self: *Parser) Error!*Expr {
-    return try self.expression();
+pub fn parse(self: *Parser) Error![]const Statement {
+    while (!self.atEnd())
+        try self.statements.append(try self.declaration());
+
+    return self.statements.items;
 }
 
-// recursive descent (into madness)
+fn declaration(self: *Parser) Error!Statement {
+    if (self.matchOne(.Var))
+        return self.declStatement();
+
+    return self.statement();
+}
+
+fn declStatement(self: *Parser) Error!Statement {
+    const identifier = try self.consume(.Identifier, "Expected identifier after var, got {}", .{self.peek()});
+    const initialiser = if (self.matchOne(.Equal)) try self.expression() else null;
+
+    _ = try self.consume(.Semicolon, "Expected ';' after variable declaration, got {}", .{self.peek()});
+    return Statement{ .decl = .{ .identifier = identifier.lexeme, .initialiser = initialiser } };
+}
+
+fn statement(self: *Parser) Error!Statement {
+    if (self.matchOne(.Exit))
+        return self.exitStatement();
+    if (self.matchOne(.Print))
+        return self.printStatement();
+
+    return self.exprStatement();
+}
+
+fn exitStatement(self: *Parser) Error!Statement {
+    _ = try self.consume(.Semicolon, "Expected ';' after exit, got {}", .{self.peek()});
+    return Statement.exit;
+}
+
+fn printStatement(self: *Parser) Error!Statement {
+    const expr = try self.expression();
+    _ = try self.consume(.Semicolon, "Expected ';' after value, got {}", .{self.peek()});
+    return Statement{ .print = .{ .expr = expr } };
+}
+
+fn exprStatement(self: *Parser) Error!Statement {
+    const expr = try self.expression();
+    _ = try self.consume(.Semicolon, "Expected ';' after expression, got {}", .{self.peek()});
+    return Statement{ .expr = .{ .expr = expr } };
+}
+
 fn expression(self: *Parser) Error!*Expr {
-    return try self.equality();
+    return try self.assignment();
+}
+
+fn assignment(self: *Parser) Error!*Expr {
+    const expr = try self.equality();
+
+    if (self.matchOne(.Equal)) {
+        const equals = self.previous();
+        const value = try self.assignment();
+        if (expr.* == .variable) {
+            const identifier = expr.variable.identifier;
+            const right = Expr{ .assign = .{ .identifier = identifier, .value = value } };
+            return try self.exprs.add(right);
+        }
+
+        reportErr(equals.line, "Invalid assignment target \"{s}\"", .{expr});
+    }
+
+    return expr;
 }
 
 fn equality(self: *Parser) Error!*Expr {
@@ -192,6 +256,9 @@ fn primary(self: *Parser) Error!*Expr {
     if (self.match(&[_]Token.Type{ .True, .False, .None, .String, .Integer, .Float }))
         return try self.exprs.add(.{ .literal = .{ .value = self.previous().literal } });
 
+    if (self.matchOne(.Identifier))
+        return try self.exprs.add(.{ .variable = .{ .identifier = self.previous() } });
+
     if (self.matchOne(.LeftParen)) {
         const expr = try self.expression();
         _ = try self.consume(.RightParen, "Expected ')' after expression, got {}", .{self.peek().token_type});
@@ -269,10 +336,11 @@ fn previous(self: Parser) Token {
 }
 
 test "Parser" {
+    const AstPrinter = @import("AstPrinter.zig");
     const tokens = [_]Token{
-        Token{ .token_type = .Minus },
+        Token{ .token_type = .Minus, .lexeme = "-" },
         Token{ .token_type = .Integer, .literal = .{ .int = 123 } },
-        Token{ .token_type = .Star },
+        Token{ .token_type = .Star, .lexeme = "*" },
         Token{ .token_type = .LeftParen },
         Token{ .token_type = .Float, .literal = .{ .float = 45.67 } },
         Token{ .token_type = .RightParen },
@@ -287,7 +355,6 @@ test "Parser" {
     std.debug.print("{}\n", .{expr});
 
     const writer = std.io.getStdErr().writer();
-    var printer = AstPrinter{};
-    try printer.parenthesize(expr, writer);
+    try AstPrinter.parenthesize(expr, writer);
     try writer.writeByte('\n');
 }

@@ -9,7 +9,7 @@ const Scanner = @This();
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 
-const reportErr = @import("root").reportErr;
+const reportErr = @import("util.zig").reportErr;
 const Token = @import("Token.zig");
 const Expr = @import("expr.zig").Expr;
 
@@ -28,7 +28,7 @@ fn atEnd(self: Scanner) bool {
     return self.current_idx >= self.source.len;
 }
 
-pub fn scanTokens(self: *Scanner) !void {
+pub fn scanTokens(self: *Scanner) ![]const Token {
     while (!self.atEnd()) {
         self.start_idx = self.current_idx;
         try self.scanToken();
@@ -41,6 +41,8 @@ pub fn scanTokens(self: *Scanner) !void {
 
     if (self.had_error)
         return error.ScannerError;
+
+    return self.tokens.items;
 }
 
 fn scanToken(self: *Scanner) !void {
@@ -150,7 +152,7 @@ fn isDigit(char: u8) bool {
 }
 
 fn isValidIdentifierChar(char: u8) bool {
-    return (char >= 'a' and char <= 'z') or (char >= 'A' and char <= 'Z') or char == '_';
+    return (char >= 'a' and char <= 'z') or (char >= 'A' and char <= 'Z') or isDigit(char) or char == '_';
 }
 
 fn readNumber(self: *Scanner) !void {

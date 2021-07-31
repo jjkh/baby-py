@@ -1,0 +1,6 @@
+var a = "test";
+print a;
+var b = "test2";
+print b;
+a = b;
+print a;

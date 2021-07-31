@@ -2,12 +2,15 @@ const std = @import("std");
 const Writer = std.fs.File.Writer;
 
 const Token = @import("Token.zig");
+const returnType = @import("util.zig").returnType;
 
 pub const Expr = union(enum) {
     binary: Binary,
     grouping: Grouping,
     literal: Literal,
     unary: Unary,
+    variable: Variable,
+    assign: Assign,
 
     pub const Binary = struct {
         left: *const Expr,
@@ -24,14 +27,8 @@ pub const Expr = union(enum) {
         right: *const Expr,
     };
 
-    fn returnType(func: anytype) type {
-        const fn_type_info = @typeInfo(@TypeOf(func));
-        switch (fn_type_info) {
-            .BoundFn => return fn_type_info.BoundFn.return_type.?,
-            .Fn => return fn_type_info.Fn.return_type.?,
-            else => @compileError("returnType() must be passed a function or method"),
-        }
-    }
+    pub const Variable = struct { identifier: Token };
+    pub const Assign = struct { identifier: Token, value: *const Expr };
 
     pub fn visit(self: Expr, visitor: anytype, args: anytype) returnType(visitor.visitBinary) {
         return switch (self) {
@@ -39,6 +36,8 @@ pub const Expr = union(enum) {
             .grouping => |expr| visitor.visitGrouping(expr, args),
             .literal => |expr| visitor.visitLiteral(expr, args),
             .unary => |expr| visitor.visitUnary(expr, args),
+            .variable => |expr| visitor.visitVariable(expr, args),
+            .assign => |expr| visitor.visitAssign(expr, args),
         };
     }
 };

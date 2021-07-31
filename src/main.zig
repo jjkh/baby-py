@@ -9,22 +9,7 @@ const Scanner = @import("Scanner.zig");
 const Parser = @import("Parser.zig");
 const AstPrinter = @import("AstPrinter.zig");
 const Interpreter = @import("Interpreter.zig");
-
-// --------- error handling ----------
-
-pub fn reportErr(line: usize, comptime msg: []const u8, args: anytype) void {
-    // TODO: something else, i guess
-    var buf: [512]u8 = undefined;
-
-    report(line, "", std.fmt.bufPrint(&buf, msg, args) catch "error writing error, how ironic :^(");
-}
-
-fn report(line: usize, where: []const u8, msg: []const u8) void {
-    print("[line {}] Error{s}: {s}\n", .{ line + 1, where, msg });
-    // interpreter_state.had_error = true;
-}
-
-// --------- main ----------
+const reportErr = @import("util").reportErr;
 
 pub fn main() !void {
     var general_purpose_allocator = std.heap.GeneralPurposeAllocator(.{ .safety = true }){};
@@ -51,7 +36,13 @@ fn runScript(allocator: *Allocator, path: []const u8) !void {
     const file_contents = try std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
     defer allocator.free(file_contents);
 
-    try run(allocator, file_contents);
+    var interpreter = Interpreter.init(allocator);
+    defer interpreter.deinit();
+
+    run(allocator, file_contents, & interpreter) catch |err| switch (err) {
+        error.UserExit => return,
+        else => return err,
+    };
 }
 
 // borrowed (stolen) from ziglearn.org
@@ -71,37 +62,41 @@ fn runPrompt(allocator: *Allocator) !void {
 
     const stdin = std.io.getStdIn();
 
+    var interpreter = Interpreter.init(allocator);
+    defer interpreter.deinit();
+
     while (true) {
         print("> ", .{});
         const line = try readNextLine(stdin.reader(), in_buf);
 
-        run(allocator, line) catch {}; // ignore errors and continue
+        run(allocator, line, &interpreter) catch |err| {
+            if (err == error.UserExit)
+                return;
+        }; // ignore errors and continue
     }
 }
 
 // --------- the rest ----------
 
-fn run(allocator: *Allocator, source: []const u8) !void {
+fn run(allocator: *Allocator, source: []const u8, interpreter: *Interpreter) !void {
     var scanner = Scanner.init(allocator, source);
     defer scanner.deinit();
 
-    try scanner.scanTokens();
+    const tokens = try scanner.scanTokens();
     if (debug) {
-        for (scanner.tokens.items) |token|
+        for (tokens) |token|
             print("{}, ", .{token});
         print("\n", .{});
     }
 
-    var parser = Parser.init(allocator, scanner.tokens.items);
+    var parser = Parser.init(allocator, tokens);
     defer parser.deinit();
 
-    const expr = try parser.parse();
-    if (debug) {
-        const writer = std.io.getStdErr().writer();
-        try AstPrinter.parenthesize(expr, writer);
-        try writer.writeByte('\n');
-    }
-
-    const result = try Interpreter.evaluate(expr);
-    print("{}\n", .{result});
+    const statements = try parser.parse();
+    // if (debug) {
+    //     const writer = std.io.getStdErr().writer();
+    //     try AstPrinter.parenthesize(expr, writer);
+    //     try writer.writeByte('\n');
+    // }
+    try interpreter.interpret(statements);
 }
