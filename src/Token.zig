@@ -67,10 +67,48 @@ pub const Literal = union(enum) {
 
         return switch (self) {
             .int => |x_val| std.fmt.format(writer, "{}", .{x_val}),
-            .bool => |x_val| std.fmt.format(writer, "{}", .{x_val}),
+            .bool => |x_bool| if (x_bool) std.fmt.format(writer, "True", .{}) else std.fmt.format(writer, "False", .{}),
             .float => |x_float| std.fmt.format(writer, "{d}", .{x_float}),
-            .string => |x_string| std.fmt.format(writer, "{s}", .{x_string}),
+            .string => |x_string| std.fmt.format(writer, "\"{s}\"", .{x_string}),
             .none => std.fmt.format(writer, "None", .{}),
+        };
+    }
+
+    pub fn isNumeric(self: Literal) bool {
+        return self == .int or self == .float;
+    }
+
+    pub fn isEqual(self: Literal, other: Literal) bool {
+        if (self.isNumeric() and other.isNumeric()) {
+            if (self == .int and other == .int) {
+                return self.int == other.int;
+            } else {
+                return self.toFloat() == other.toFloat();
+            }
+        }
+        if (@enumToInt(self) != @enumToInt(other)) return false;
+
+        return switch (self) {
+            .bool => self.bool == other.bool,
+            .string => std.mem.eql(u8, self.string, other.string),
+            .none => true,
+            else => unreachable,
+        };
+    }
+
+    pub fn toFloat(self: Literal) f32 {
+        return switch (self) {
+            .float => self.float,
+            .int => @intToFloat(f32, self.int),
+            else => unreachable,
+        };
+    }
+
+    pub fn toInt(self: Literal) i32 {
+        return switch (self) {
+            .float => @floatToInt(i32, self.float),
+            .int => self.int,
+            else => unreachable,
         };
     }
 };

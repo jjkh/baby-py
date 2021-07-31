@@ -3,6 +3,7 @@ tokens: std.ArrayList(Token),
 start_idx: usize = 0,
 current_idx: usize = 0,
 line: usize = 0,
+had_error: bool = false,
 
 const Scanner = @This();
 const std = @import("std");
@@ -37,6 +38,9 @@ pub fn scanTokens(self: *Scanner) !void {
         .token_type = .EndOfFile,
         .line = self.line,
     });
+
+    if (self.had_error)
+        return error.ScannerError;
 }
 
 fn scanToken(self: *Scanner) !void {
@@ -75,7 +79,7 @@ fn scanToken(self: *Scanner) !void {
         'a'...'z', 'A'...'Z', '_' => try self.readIdentifier(),
         ' ', '\r', '\t' => {},
         '\n' => self.line += 1,
-        else => reportErr(self.line, "Unexpected character '{c}'.", .{char}),
+        else => self.reportScannerErr("Unexpected character '{c}'.", .{char}),
     }
 }
 
@@ -111,12 +115,17 @@ fn match(self: *Scanner, expected: u8) bool {
     return true;
 }
 
+fn reportScannerErr(self: *Scanner, comptime message: []const u8, args: anytype) void {
+    reportErr(self.line, message, args);
+    self.had_error = true;
+}
+
 fn readString(self: *Scanner) !void {
     while (!self.atEnd() and self.peek() != '"' and self.peek() != '\n')
         _ = self.advance();
 
     if (self.atEnd() or self.peek() == '\n') {
-        reportErr(self.line, "Unterminated string.", .{});
+        self.reportScannerErr("Unterminated string.", .{});
         return;
     }
 
@@ -156,12 +165,18 @@ fn readNumber(self: *Scanner) !void {
 
         try self.addToken(.{
             .token_type = .Float,
-            .literal = .{ .float = try std.fmt.parseFloat(f32, self.source[self.start_idx..self.current_idx]) },
+            .literal = .{ .float = std.fmt.parseFloat(f32, self.source[self.start_idx..self.current_idx]) catch |err| {
+                self.reportScannerErr("Error parsing float: {}", .{err});
+                return;
+            } },
         });
     } else {
         try self.addToken(.{
             .token_type = .Integer,
-            .literal = .{ .int = try std.fmt.parseInt(i32, self.source[self.start_idx..self.current_idx], 10) },
+            .literal = .{ .int = std.fmt.parseInt(i32, self.source[self.start_idx..self.current_idx], 10) catch |err| {
+                self.reportScannerErr("Error parsing float: {}", .{err});
+                return;
+            } },
         });
     }
 }
@@ -178,7 +193,7 @@ fn readHexInt(self: *Scanner) !void {
         while (isHexDigit(self.peek()))
             _ = self.advance();
 
-        reportErr(self.line, "Invalid period in hex literal.", .{});
+        self.reportScannerErr("Invalid period in hex literal.", .{});
         return;
     }
 
@@ -200,7 +215,7 @@ fn readBinInt(self: *Scanner) !void {
         while (isBinDigit(self.peek()))
             _ = self.advance();
 
-        reportErr(self.line, "Invalid period in bin literal.", .{});
+        self.reportScannerErr("Invalid period in bin literal.", .{});
         return;
     }
 

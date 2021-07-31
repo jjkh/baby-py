@@ -8,11 +8,7 @@ const print = std.debug.print;
 const Scanner = @import("Scanner.zig");
 const Parser = @import("Parser.zig");
 const AstPrinter = @import("AstPrinter.zig");
-// --------- global state ----------
-
-var interpreter_state = struct {
-    had_error: bool = false,
-}{};
+const Interpreter = @import("Interpreter.zig");
 
 // --------- error handling ----------
 
@@ -25,7 +21,7 @@ pub fn reportErr(line: usize, comptime msg: []const u8, args: anytype) void {
 
 fn report(line: usize, where: []const u8, msg: []const u8) void {
     print("[line {}] Error{s}: {s}\n", .{ line + 1, where, msg });
-    interpreter_state.had_error = true;
+    // interpreter_state.had_error = true;
 }
 
 // --------- main ----------
@@ -47,8 +43,6 @@ pub fn main() !void {
             return error.InvalidArgs;
         },
     }
-
-    if (interpreter_state.had_error) return error.UserError;
 }
 
 // --------- user input handling ----------
@@ -81,8 +75,7 @@ fn runPrompt(allocator: *Allocator) !void {
         print("> ", .{});
         const line = try readNextLine(stdin.reader(), in_buf);
 
-        try run(allocator, line);
-        interpreter_state.had_error = false;
+        run(allocator, line) catch {}; // ignore errors and continue
     }
 }
 
@@ -93,23 +86,22 @@ fn run(allocator: *Allocator, source: []const u8) !void {
     defer scanner.deinit();
 
     try scanner.scanTokens();
-
-    var parser = Parser.init(allocator, scanner.tokens.items);
-    defer parser.deinit();
-
     if (debug) {
         for (scanner.tokens.items) |token|
             print("{}, ", .{token});
         print("\n", .{});
     }
 
-    const expr = parser.parse() catch |err| switch (err) {
-        error.ParseError => return,
-        else => return err,
-    };
+    var parser = Parser.init(allocator, scanner.tokens.items);
+    defer parser.deinit();
 
-    const writer = std.io.getStdErr().writer();
-    var printer = AstPrinter{};
-    try printer.parenthesize(expr, writer);
-    try writer.writeByte('\n');
+    const expr = try parser.parse();
+    if (debug) {
+        const writer = std.io.getStdErr().writer();
+        try AstPrinter.parenthesize(expr, writer);
+        try writer.writeByte('\n');
+    }
+
+    const result = try Interpreter.evaluate(expr);
+    print("{}\n", .{result});
 }

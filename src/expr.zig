@@ -24,12 +24,21 @@ pub const Expr = union(enum) {
         right: *const Expr,
     };
 
-    pub fn visit(self: Expr, visitor: anytype, args: anytype) !void {
-        switch (self) {
-            .binary => |expr| try visitor.visitBinary(expr, args),
-            .grouping => |expr| try visitor.visitGrouping(expr, args),
-            .literal => |expr| try visitor.visitLiteral(expr, args),
-            .unary => |expr| try visitor.visitUnary(expr, args),
+    fn returnType(func: anytype) type {
+        const fn_type_info = @typeInfo(@TypeOf(func));
+        switch (fn_type_info) {
+            .BoundFn => return fn_type_info.BoundFn.return_type.?,
+            .Fn => return fn_type_info.Fn.return_type.?,
+            else => @compileError("returnType() must be passed a function or method"),
         }
+    }
+
+    pub fn visit(self: Expr, visitor: anytype, args: anytype) returnType(visitor.visitBinary) {
+        return switch (self) {
+            .binary => |expr| visitor.visitBinary(expr, args),
+            .grouping => |expr| visitor.visitGrouping(expr, args),
+            .literal => |expr| visitor.visitLiteral(expr, args),
+            .unary => |expr| visitor.visitUnary(expr, args),
+        };
     }
 };
