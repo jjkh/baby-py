@@ -36,10 +36,10 @@ fn runScript(allocator: *Allocator, path: []const u8) !void {
     const file_contents = try std.fs.cwd().readFileAlloc(allocator, path, 1024 * 1024);
     defer allocator.free(file_contents);
 
-    var interpreter = Interpreter.init(allocator);
+    var interpreter = try Interpreter.init(allocator);
     defer interpreter.deinit();
 
-    run(allocator, file_contents, & interpreter) catch |err| switch (err) {
+    run(allocator, file_contents, &interpreter) catch |err| switch (err) {
         error.UserExit => return,
         else => return err,
     };
@@ -62,7 +62,7 @@ fn runPrompt(allocator: *Allocator) !void {
 
     const stdin = std.io.getStdIn();
 
-    var interpreter = Interpreter.init(allocator);
+    var interpreter = try Interpreter.init(allocator);
     defer interpreter.deinit();
 
     while (true) {
@@ -89,14 +89,10 @@ fn run(allocator: *Allocator, source: []const u8, interpreter: *Interpreter) !vo
         print("\n", .{});
     }
 
+    // ensure the allocator lives until the statements are interpreted
     var parser = Parser.init(allocator, tokens);
     defer parser.deinit();
 
     const statements = try parser.parse();
-    // if (debug) {
-    //     const writer = std.io.getStdErr().writer();
-    //     try AstPrinter.parenthesize(expr, writer);
-    //     try writer.writeByte('\n');
-    // }
     try interpreter.interpret(statements);
 }

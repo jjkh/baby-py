@@ -1,5 +1,6 @@
 allocator: *Allocator,
 values: StringHashMap(Value),
+enclosing: ?*Environment,
 
 const Environment = @This();
 const std = @import("std");
@@ -8,8 +9,14 @@ const Value = @import("Interpreter.zig").Value;
 const Allocator = std.mem.Allocator;
 const StringHashMap = std.StringHashMap;
 
-pub fn init(allocator: *Allocator) Environment {
-    return .{ .allocator = allocator, .values = StringHashMap(Value).init(allocator) };
+pub fn init(allocator: *Allocator, enclosing: ?*Environment) Environment {
+    const env = .{
+        .allocator = allocator,
+        .values = StringHashMap(Value).init(allocator),
+        .enclosing = enclosing,
+    };
+
+    return env;
 }
 
 pub fn deinit(self: *Environment) void {
@@ -30,10 +37,13 @@ pub fn define(self: *Environment, identifier: []const u8, value: Value) !void {
 }
 
 pub fn assign(self: *Environment, identifier: []const u8, value: Value) !void {
-    if (self.clearAndGetValue(identifier)) |old_value|
-        old_value.* = try value.copyAlloc(self.allocator)
-    else
-        return error.UndefinedIdentifier;
+    if (self.clearAndGetValue(identifier)) |old_value| {
+        old_value.* = try value.copyAlloc(self.allocator);
+        return;
+    }
+    if (self.enclosing) |parent_env| return parent_env.assign(identifier, value);
+
+    return error.UndefinedIdentifier;
 }
 
 fn clearAndGetValue(self: *Environment, identifier: []const u8) ?*Value {
@@ -46,5 +56,8 @@ fn clearAndGetValue(self: *Environment, identifier: []const u8) ?*Value {
 }
 
 pub fn get(self: Environment, identifier: []const u8) !Value {
-    return self.values.get(identifier) orelse error.UndefinedIdentifier;
+    if (self.values.get(identifier)) |value| return value;
+    if (self.enclosing) |parent_env| return parent_env.get(identifier);
+
+    return error.UndefinedIdentifier;
 }

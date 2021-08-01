@@ -1,3 +1,4 @@
+allocator: *Allocator,
 tokens: []const Token,
 exprs: ExprLinkedList,
 statements: ArrayList(Statement),
@@ -99,6 +100,7 @@ test "ExprLinkedList nested" {
 
 pub fn init(allocator: *Allocator, tokens: []const Token) Parser {
     return Parser{
+        .allocator = allocator,
         .tokens = tokens,
         .exprs = ExprLinkedList.init(allocator),
         .statements = ArrayList(Statement).init(allocator),
@@ -106,6 +108,9 @@ pub fn init(allocator: *Allocator, tokens: []const Token) Parser {
 }
 
 pub fn deinit(self: *Parser) void {
+    for (self.statements.items) |stmt|
+        if (stmt == .block) stmt.block.deinit(self.allocator);
+
     self.statements.deinit();
     self.exprs.deinit();
 }
@@ -137,6 +142,8 @@ fn statement(self: *Parser) Error!Statement {
         return self.exitStatement();
     if (self.matchOne(.Print))
         return self.printStatement();
+    if (self.matchOne(.LeftBrace))
+        return self.blockStatement();
 
     return self.exprStatement();
 }
@@ -156,6 +163,18 @@ fn exprStatement(self: *Parser) Error!Statement {
     const expr = try self.expression();
     _ = try self.consume(.Semicolon, "Expected ';' after expression, got {}", .{self.peek()});
     return Statement{ .expr = .{ .expr = expr } };
+}
+
+fn blockStatement(self: *Parser) Error!Statement {
+    var statements = ArrayList(Statement).init(self.allocator);
+    defer statements.deinit();
+
+    while (!self.check(.RightBrace) and !self.atEnd())
+        try statements.append(try self.declaration());
+
+    _ = try self.consume(.RightBrace, "Expected '}}' after block, got {}", .{self.peek()});
+
+    return Statement{ .block = .{ .statements = statements.toOwnedSlice() } };
 }
 
 fn expression(self: *Parser) Error!*Expr {

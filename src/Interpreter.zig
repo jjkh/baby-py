@@ -1,5 +1,5 @@
 allocator: *Allocator,
-environment: Environment,
+environment: *Environment,
 arena: *Allocator = undefined,
 
 const Interpreter = @This();
@@ -102,25 +102,26 @@ pub const Value = union(enum) {
     }
 };
 
-pub fn init(allocator: *Allocator) Interpreter {
+pub fn init(allocator: *Allocator) !Interpreter {
+    var env = try allocator.create(Environment);
+    env.* = Environment.init(allocator, null);
     return Interpreter{
         .allocator = allocator,
-        .environment = Environment.init(allocator),
+        .environment = env,
     };
 }
 
 pub fn deinit(self: *Interpreter) void {
     self.environment.deinit();
+    self.allocator.destroy(self.environment);
 }
 
 pub fn interpret(self: *Interpreter, statements: []const Statement) Error!void {
-    for (statements) |stmt| {
-        var arena = ArenaAllocator.init(self.allocator);
-        defer arena.deinit();
-        self.arena = &arena.allocator;
+    var arena = ArenaAllocator.init(self.allocator);
+    defer arena.deinit();
+    self.arena = &arena.allocator;
 
-        try stmt.visit(self, .{});
-    }
+    for (statements) |stmt| try self.execute(stmt);
 }
 
 pub fn visitExprStatement(self: *Interpreter, stmt: Statement.ExprStatement, _: struct {}) Error!void {
@@ -137,17 +138,30 @@ pub fn visitExitStatement(self: Interpreter, stmt: void, _: struct {}) Error!voi
     _ = stmt;
     return error.UserExit;
 }
-
-// pub fn visitDeclStatement(self: Interpreter, stmt: Statement.DeclStatement, _: struct {}) Error!void {
-//     const value = if (stmt.initialiser) |initialiser| try self.evaluate(initialiser) else Token.Literal.none;
-//     try self.environment.define(stmt.identifier, value);
-// }
-
 pub fn visitDeclStatement(self: *Interpreter, stmt: Statement.DeclStatement, _: struct {}) Error!void {
     if (stmt.initialiser) |initialiser|
         try self.environment.define(stmt.identifier, try self.evaluate(initialiser))
     else
         try self.environment.define(stmt.identifier, Value.none);
+}
+
+pub fn visitBlockStatement(self: *Interpreter, stmt: Statement.BlockStatement, _: struct {}) Error!void {
+    var block_env = Environment.init(self.allocator, self.environment);
+    defer block_env.deinit();
+
+    try self.executeBlock(stmt.statements, &block_env);
+}
+
+fn executeBlock(self: *Interpreter, statements: []const Statement, environment: *Environment) Error!void {
+    const enclosing_environment = self.environment;
+    self.environment = environment;
+    defer self.environment = enclosing_environment;
+
+    for (statements) |stmt| try self.execute(stmt);
+}
+
+fn execute(self: *Interpreter, stmt: Statement) Error!void {
+    try stmt.visit(self, .{});
 }
 
 fn evaluate(self: *Interpreter, expr: *const Expr) Error!Value {
