@@ -109,7 +109,7 @@ pub fn init(allocator: *Allocator, tokens: []const Token) Parser {
 
 pub fn deinit(self: *Parser) void {
     for (self.statements.items) |stmt|
-        if (stmt == .block) stmt.block.deinit(self.allocator);
+        stmt.deinit(self.allocator);
 
     self.statements.deinit();
     self.exprs.deinit();
@@ -138,12 +138,11 @@ fn declStatement(self: *Parser) Error!Statement {
 }
 
 fn statement(self: *Parser) Error!Statement {
-    if (self.matchOne(.Exit))
-        return self.exitStatement();
-    if (self.matchOne(.Print))
-        return self.printStatement();
-    if (self.matchOne(.LeftBrace))
-        return self.blockStatement();
+    if (self.matchOne(.Exit)) return self.exitStatement();
+    if (self.matchOne(.If)) return self.ifStatement();
+    if (self.matchOne(.Print)) return self.printStatement();
+    if (self.matchOne(.While)) return self.whileStatement();
+    if (self.matchOne(.LeftBrace)) return self.blockStatement();
 
     return self.exprStatement();
 }
@@ -153,10 +152,45 @@ fn exitStatement(self: *Parser) Error!Statement {
     return Statement.exit;
 }
 
+fn ifStatement(self: *Parser) Error!Statement {
+    _ = try self.consume(.LeftParen, "Expected '(' after 'if', got {}", .{self.peek()});
+    const condition = try self.expression();
+    _ = try self.consume(.RightParen, "Expected ')' after if condition, got {}", .{self.peek()});
+
+    const thenBranch = try self.allocator.create(Statement);
+    errdefer self.allocator.destroy(thenBranch);
+    thenBranch.* = try self.statement();
+
+    var elseBranch: ?*Statement = null;
+    if (self.matchOne(.Else)) {
+        elseBranch = try self.allocator.create(Statement);
+        errdefer self.allocator.destroy(elseBranch.?);
+        elseBranch.?.* = try self.statement();
+    }
+
+    return Statement{ .if_ = .{
+        .condition = condition,
+        .thenBranch = thenBranch,
+        .elseBranch = elseBranch,
+    } };
+}
+
 fn printStatement(self: *Parser) Error!Statement {
     const expr = try self.expression();
     _ = try self.consume(.Semicolon, "Expected ';' after value, got {}", .{self.peek()});
     return Statement{ .print = .{ .expr = expr } };
+}
+
+fn whileStatement(self: *Parser) Error!Statement {
+    _ = try self.consume(.LeftParen, "Expected '(' after 'while', got {}", .{self.peek()});
+    const condition = try self.expression();
+    _ = try self.consume(.RightParen, "Expected ')' after while condition, got {}", .{self.peek()});
+
+    const body = try self.allocator.create(Statement);
+    errdefer self.allocator.destroy(body);
+    body.* = try self.statement();
+
+    return Statement{ .while_ = .{ .condition = condition, .body = body } };
 }
 
 fn exprStatement(self: *Parser) Error!Statement {
@@ -182,7 +216,7 @@ fn expression(self: *Parser) Error!*Expr {
 }
 
 fn assignment(self: *Parser) Error!*Expr {
-    const expr = try self.equality();
+    const expr = try self.or_();
 
     if (self.matchOne(.Equal)) {
         const equals = self.previous();
@@ -194,6 +228,36 @@ fn assignment(self: *Parser) Error!*Expr {
         }
 
         reportErr(equals.line, "Invalid assignment target \"{s}\"", .{expr});
+    }
+
+    return expr;
+}
+
+fn or_(self: *Parser) Error!*Expr {
+    var expr = try self.and_();
+
+    while (self.matchOne(.Or)) {
+        const logical_expr = Expr{ .logical = .{
+            .left = expr,
+            .operator = self.previous(),
+            .right = try self.and_(),
+        } };
+        expr = try self.exprs.add(logical_expr);
+    }
+
+    return expr;
+}
+
+fn and_(self: *Parser) Error!*Expr {
+    var expr = try self.equality();
+
+    while (self.matchOne(.And)) {
+        const logical_expr = Expr{ .logical = .{
+            .left = expr,
+            .operator = self.previous(),
+            .right = try self.equality(),
+        } };
+        expr = try self.exprs.add(logical_expr);
     }
 
     return expr;

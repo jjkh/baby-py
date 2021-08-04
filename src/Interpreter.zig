@@ -152,6 +152,19 @@ pub fn visitBlockStatement(self: *Interpreter, stmt: Statement.BlockStatement, _
     try self.executeBlock(stmt.statements, &block_env);
 }
 
+pub fn visitIfStatement(self: *Interpreter, stmt: Statement.IfStatement, _: struct {}) Error!void {
+    const condition = try self.evaluate(stmt.condition);
+    if (condition.isTruthy())
+        try self.execute(stmt.thenBranch.*)
+    else if (stmt.elseBranch) |elseBranch|
+        try self.execute(elseBranch.*);
+}
+
+pub fn visitWhileStatement(self: *Interpreter, stmt: Statement.WhileStatement, _: struct {}) Error!void {
+    while ((try self.evaluate(stmt.condition)).isTruthy())
+        try self.execute(stmt.body.*);
+}
+
 fn executeBlock(self: *Interpreter, statements: []const Statement, environment: *Environment) Error!void {
     const enclosing_environment = self.environment;
     self.environment = environment;
@@ -235,12 +248,24 @@ pub fn visitBinary(self: *Interpreter, expr: Expr.Binary, _: struct {}) Error!Va
 }
 
 pub fn visitGrouping(self: *Interpreter, expr: Expr.Grouping, _: struct {}) Error!Value {
-    return try self.evaluate(expr.expr);
+    return self.evaluate(expr.expr);
 }
 
 pub fn visitLiteral(self: *Interpreter, expr: Expr.Literal, _: struct {}) Error!Value {
     _ = self;
     return Value.copy(expr.value);
+}
+
+pub fn visitLogical(self: *Interpreter, expr: Expr.Logical, _: struct {}) Error!Value {
+    const left = try self.evaluate(expr.left);
+
+    if (expr.operator.token_type == .Or) {
+        if (left.isTruthy()) return left;
+    } else {
+        if (!left.isTruthy()) return left;
+    }
+
+    return self.evaluate(expr.right);
 }
 
 pub fn visitUnary(self: *Interpreter, expr: Expr.Unary, _: struct {}) Error!Value {

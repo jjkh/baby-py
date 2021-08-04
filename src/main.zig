@@ -70,9 +70,9 @@ fn runPrompt(allocator: *Allocator) !void {
         const line = try readNextLine(stdin.reader(), in_buf);
 
         run(allocator, line, &interpreter) catch |err| {
-            if (err == error.UserExit)
-                return;
-        }; // ignore errors and continue
+            // ignore errors and continue
+            if (err == error.UserExit) return;
+        };
     }
 }
 

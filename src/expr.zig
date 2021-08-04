@@ -8,6 +8,7 @@ pub const Expr = union(enum) {
     binary: Binary,
     grouping: Grouping,
     literal: Literal,
+    logical: Logical,
     unary: Unary,
     variable: Variable,
     assign: Assign,
@@ -22,6 +23,12 @@ pub const Expr = union(enum) {
 
     pub const Literal = struct { value: Token.Literal };
 
+    pub const Logical = struct {
+        left: *const Expr,
+        operator: Token,
+        right: *const Expr,
+    };
+
     pub const Unary = struct {
         operator: Token,
         right: *const Expr,
@@ -35,6 +42,7 @@ pub const Expr = union(enum) {
             .binary => |expr| visitor.visitBinary(expr, args),
             .grouping => |expr| visitor.visitGrouping(expr, args),
             .literal => |expr| visitor.visitLiteral(expr, args),
+            .logical => |expr| visitor.visitLogical(expr, args),
             .unary => |expr| visitor.visitUnary(expr, args),
             .variable => |expr| visitor.visitVariable(expr, args),
             .assign => |expr| visitor.visitAssign(expr, args),
